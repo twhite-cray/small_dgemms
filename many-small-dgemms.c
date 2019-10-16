@@ -71,7 +71,7 @@ void print_matrix_array(double *mat_A, size_t *Aoffsets, size_t *nrows, size_t *
 }
 
 
-void host_dgemm(double *A, double* B, double* C, size_t M_in, size_t N_in, size_t K_in){
+void cblas_wrapper(double *A, double* B, double* C, size_t M_in, size_t N_in, size_t K_in){
   int M = M_in;
   int K = K_in;
   int N = N_in;
@@ -286,12 +286,12 @@ void magma_array_dgemm(
   magma_setvector(batchCount, sizeof(magma_int_t), h_k, 1, d_lddb, 1, queue);
   magma_setvector(batchCount, sizeof(magma_int_t), h_m, 1, d_lddc, 1, queue);
 
+  magma_setvector(Aoffsets[nBlocks], sizeof(double), A, 1, d_A_elems, 1, queue);
+  magma_setvector(Boffsets[nBlocks], sizeof(double), B, 1, d_B_elems, 1, queue);
+
   size_t Aoffset;
   size_t Boffset;
   size_t Coffset;
-
-  magma_setvector(Aoffsets[nBlocks], sizeof(double), A, 1, d_A_elems, 1, queue);
-  magma_setvector(Boffsets[nBlocks], sizeof(double), B, 1, d_B_elems, 1, queue);
 
   for(int iBlock = 0; iBlock < nBlocks; iBlock++){
     Aoffset = Aoffsets[iBlock];
@@ -390,6 +390,7 @@ void host_array_matmul(const double *A, const double* B, double* C,
   }
 }
 
+
 void host_array_dgemm(const double *A, const double* B, double* C,
     const size_t *Ms, const size_t *Ns, const size_t *Ks,
     const size_t *Aoffsets, const size_t *Boffsets, const size_t *Coffsets, const size_t nBlocks){
@@ -427,6 +428,7 @@ void host_array_dgemm(const double *A, const double* B, double* C,
   }
 }
 
+
 void host_transpose(double *mat_in, double *mat_out, size_t nrows_in, size_t ncols_in){
   for(size_t i = 0; i < nrows_in; i++){
     for(size_t j = 0; j < ncols_in; j++){
@@ -448,6 +450,7 @@ int check_equal(double *mat_A, double *mat_B, size_t nrows, size_t ncols){
   }
   return flag;
 }
+
 
 int check_array_equal(double *mat_A, double *mat_B, size_t *Aoffsets, size_t *Boffsets, size_t *nrows, size_t *ncols, size_t nBlocks){
   int flag = 1;
@@ -478,6 +481,7 @@ void generate_random_array(size_t* array, size_t nBlocks, size_t max_size){
   }
 }
 
+
 void load_random_matrix(double* mat_in, size_t nrows, size_t ncols){
   double rando;
 
@@ -488,6 +492,7 @@ void load_random_matrix(double* mat_in, size_t nrows, size_t ncols){
     }
   }
 }
+
 
 int main(){
   // Start magma
