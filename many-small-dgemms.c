@@ -19,6 +19,7 @@
 // tolerance as 1.e-15 fails
 #define TOL 1.e-14
 
+// Pulled from magma test code
 #define TESTING_CHECK( err )                                                 \
     do {                                                                     \
         magma_int_t err_ = (err);                                            \
@@ -29,6 +30,7 @@
             exit(1);                                                         \
         }                                                                    \
     } while( 0 )
+
 
 size_t idx(size_t i, size_t j, size_t nrows, size_t ncols){
   return j*nrows + i;
@@ -452,7 +454,7 @@ int check_equal(double *mat_A, double *mat_B, size_t nrows, size_t ncols){
 }
 
 
-int check_array_equal(double *mat_A, double *mat_B, size_t *Aoffsets, size_t *Boffsets, size_t *nrows, size_t *ncols, size_t nBlocks){
+int check_matrix_array_equal(double *mat_A, double *mat_B, size_t *Aoffsets, size_t *Boffsets, size_t *nrows, size_t *ncols, size_t nBlocks){
   int flag = 1;
   for(size_t iBlock = 0; iBlock < nBlocks; iBlock++){
     size_t Aoffset = Aoffsets[iBlock];
@@ -584,7 +586,7 @@ int main(){
   stop = omp_get_wtime();
   printf("host blas time: %f\n", stop - start);
 
-  check = check_array_equal(h_C_host, h_C, Coffsets, Coffsets, Ms_array, Ns_array, nBlocks);
+  check = check_matrix_array_equal(h_C_host, h_C, Coffsets, Coffsets, Ms_array, Ns_array, nBlocks);
   if( check == 0 ){
     printf("check host dgemm failed: %d\n",check);
   }
@@ -601,7 +603,7 @@ int main(){
   stop = omp_get_wtime();
   printf("cublas wrapper time: %f\n", stop - start);
 
-  check = check_array_equal(h_C_device, h_C, Coffsets, Coffsets, Ms_array, Ns_array, nBlocks);
+  check = check_matrix_array_equal(h_C_device, h_C, Coffsets, Coffsets, Ms_array, Ns_array, nBlocks);
   if( check == 0 ){
     printf("check device dgemm failed: %d\n",check);
   }
@@ -611,7 +613,7 @@ int main(){
   stop = omp_get_wtime();
   printf("magma blas wrapper time: %f\n", stop - start);
 
-  check = check_array_equal(h_C_magma, h_C, Coffsets, Coffsets, Ms_array, Ns_array, nBlocks);
+  check = check_matrix_array_equal(h_C_magma, h_C, Coffsets, Coffsets, Ms_array, Ns_array, nBlocks);
   if( check == 0 ){
     printf("magma dgemm failed: %d\n",check);
   }
