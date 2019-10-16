@@ -146,7 +146,7 @@ void device_dgemm(cublasHandle_t handle, double *A, double* B, double* C, size_t
 }
 
 
-void device_array_dgemm(
+void cublas_array_dgemm(
     cublasHandle_t handle,
     const double *A, const double* B, double* C,
     const size_t *Ms, const size_t *Ns, const size_t *Ks,
@@ -592,7 +592,7 @@ int main(){
   cublasCreate(&handle);
 
   start = omp_get_wtime();
-  device_array_dgemm(handle, h_A, h_B, h_C_device, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks);
+  cublas_array_dgemm(handle, h_A, h_B, h_C_device, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks);
   stop = omp_get_wtime();
   printf("cublas wrapper time: %f\n", stop - start);
 
