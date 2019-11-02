@@ -11,6 +11,7 @@
 #include <time.h>
 #include <cblas.h>
 #include <cublas_v2.h>
+#include <cuda_runtime.h>
 #include <omp.h>
 #include <string.h> //for memcpy
 
@@ -118,9 +119,9 @@ void device_dgemm(cublasHandle_t handle, double *A, double* B, double* C, size_t
   double *d_B;
   double *d_C;
 
-  cudaMalloc(&d_A, ABytes);
-  cudaMalloc(&d_B, BBytes);
-  cudaMalloc(&d_C, CBytes);
+  cudaMalloc((void**)&d_A, ABytes);
+  cudaMalloc((void**)&d_B, BBytes);
+  cudaMalloc((void**)&d_C, CBytes);
 
   cudaMemcpy(d_A, A, ABytes, cudaMemcpyHostToDevice);
   cudaMemcpy(d_B, B, BBytes, cudaMemcpyHostToDevice);
@@ -159,9 +160,9 @@ void cublas_array_dgemm(
   size_t BBytes = Boffsets[nBlocks]*sizeof(double);
   size_t CBytes = Coffsets[nBlocks]*sizeof(double);
 
-  cudaMalloc(&d_A, ABytes);
-  cudaMalloc(&d_B, BBytes);
-  cudaMalloc(&d_C, CBytes);
+  cudaMalloc((void**)&d_A, ABytes);
+  cudaMalloc((void**)&d_B, BBytes);
+  cudaMalloc((void**)&d_C, CBytes);
 
   cudaMemcpy(d_A, A, ABytes, cudaMemcpyHostToDevice);
   cudaMemcpy(d_B, B, BBytes, cudaMemcpyHostToDevice);
@@ -462,7 +463,7 @@ int check_matrix_array_equal(double *mat_A, double *mat_B, size_t *Aoffsets, siz
 
     flag *= check_equal( &mat_A[Aoffset], &mat_B[Boffset], nrows[iBlock], ncols[iBlock] );
     if( !check_equal(&mat_A[Aoffset], &mat_B[Boffset], nrows[iBlock], ncols[iBlock]) ){
-      printf("error in block: %zu\n");
+      printf("error in block: %zu\n", iBlock);
       printf("A\n");
       print_matrix( &mat_A[Aoffset], nrows[iBlock], ncols[iBlock] );
       printf("B\n");

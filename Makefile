@@ -1,5 +1,5 @@
-ccomp?=gcc
-cflags=-fopenmp -O3
+ccomp?=cc
+cflags=-fopenmp -Ofast
 cexec=many-small-dgemms.x
 csources=many-small-dgemms.c
 cobjects=${patsubst %.c,%.c.obj, $(csources)}
@@ -14,5 +14,5 @@ $(cexec): $(cobjects)
 	$(ccomp) $(cflags) -g -c -o $@ $<
 
 clean:
-	rm *.o *.c.obj $(cexec)
+	rm -f *.o *.c.obj $(cexec)
 
