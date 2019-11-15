@@ -503,7 +503,7 @@ int main(){
   magma_print_environment();
 
   // magma seems to break at 2^16, but 2^15 blocks is fine
-  size_t nBlocks = 1<<15;
+  size_t nBlocks = 1<<25;
   size_t max_block_size = 10;
   // Small test for debugging
   // size_t nBlocks = 3;
