@@ -1,0 +1,20 @@
+CFLAGS += -std=c99 -g -Ofast -fopenmp -DO_HIP -I$(HIP_PATH)/include -D__HIP_PLATFORM_HCC__
+
+CXX := hipcc
+CXXFLAGS += -g -Ofast -Wno-unused-command-line-argument --amdgpu-target=gfx906
+
+LD := $(CXX)
+LDFLAGS := $(CXXFLAGS)
+LIBS := -lopenblas -lgomp
+
+CSRC := $(wildcard *.c) 
+CXXSRC := $(wildcard *.cpp)
+OBJ := $(CSRC:.c=.o) $(CXXSRC:.cpp=.o)
+
+EXE := many-small-dgemms.x
+
+$(EXE): $(OBJ)
+	$(LD) $(LDFLAGS) $(OBJ) -o $(EXE) $(LIBS)
+
+clean:
+	rm -f $(OBJ) $(EXE)

@@ -6,19 +6,23 @@
 // Author: Justin Gage Lietz
 // Contact: lietzjg@ornl.gov
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <cblas.h>
+#ifdef O_CUDA
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
+#endif
 #include <omp.h>
 #include <string.h> //for memcpy
 
-#include <magma_v2.h>
-
 // tolerance as 1.e-15 fails
 #define TOL 1.e-14
+
+#ifdef O_MAGMA
+#include <magma_v2.h>
 
 // Pulled from magma test code
 #define TESTING_CHECK( err )                                                 \
@@ -31,6 +35,22 @@
             exit(1);                                                         \
         }                                                                    \
     } while( 0 )
+#endif
+
+#ifdef O_HIP
+#include <hip/hip_runtime_api.h>
+#include "gem.h"
+
+#define HIP_CHECK(statement) \
+  { \
+    const hipError_t err = (statement); \
+    if (err != hipSuccess) { \
+      fprintf(stderr,"Error: %s\nfailed at %s:%d: error %d: %s\n",#statement, \
+          __FILE__,__LINE__,err,hipGetErrorString(err)); \
+      exit(err); \
+    } \
+  }
+#endif
 
 
 size_t idx(size_t i, size_t j, size_t nrows, size_t ncols){
@@ -74,6 +94,7 @@ void print_matrix_array(double *mat_A, size_t *Aoffsets, size_t *nrows, size_t *
 }
 
 
+#ifdef O_CUDA
 void cblas_wrapper(double *A, double* B, double* C, size_t M_in, size_t N_in, size_t K_in){
   int M = M_in;
   int K = K_in;
@@ -153,7 +174,7 @@ void cublas_array_dgemm(
     cublasHandle_t handle,
     const double *A, const double* B, double* C,
     const size_t *Ms, const size_t *Ns, const size_t *Ks,
-    const size_t *Aoffsets, const size_t *Boffsets, const size_t *Coffsets, const size_t nBlocks){
+    const size_t *Aoffsets, const size_t *Boffsets, const size_t *Coffsets, const size_t nBlocks, const int nIters){
 
   double *d_A, *d_B, *d_C;
   size_t ABytes = Aoffsets[nBlocks]*sizeof(double);
@@ -169,51 +190,135 @@ void cublas_array_dgemm(
 
   double start = omp_get_wtime();
 
-  for(size_t iBlock = 0; iBlock < nBlocks; iBlock++){
-    size_t Aoffset = Aoffsets[iBlock];
-    size_t Boffset = Boffsets[iBlock];
-    size_t Coffset = Coffsets[iBlock];
+  for(int i = 0; i <  nIters; i++){
+    for(size_t iBlock = 0; iBlock < nBlocks; iBlock++){
+      size_t Aoffset = Aoffsets[iBlock];
+      size_t Boffset = Boffsets[iBlock];
+      size_t Coffset = Coffsets[iBlock];
 
-    int M = Ms[iBlock];
-    int N = Ns[iBlock];
-    int K = Ks[iBlock];
-    int LDA = M;
-    int LDB = K;
-    int LDC = M;
-    double alpha = 1.0;
-    double beta = 0.0;
-    /* char transa = 'N'; */
-    /* char transb = 'N'; */
+      int M = Ms[iBlock];
+      int N = Ns[iBlock];
+      int K = Ks[iBlock];
+      int LDA = M;
+      int LDB = K;
+      int LDC = M;
+      double alpha = 1.0;
+      double beta = 0.0;
+      /* char transa = 'N'; */
+      /* char transb = 'N'; */
 
-    cublasDgemm(/*cublas handle*/ handle,
-        /* TRANS A */ CUBLAS_OP_N,
-        /* TRANS B */ CUBLAS_OP_N,
-        /* M */       M,
-        /* N */       N,
-        /* K */       K,
-        /* alpha */   &alpha,
-        /* A */       &d_A[Aoffset],
-        /* LDA */     LDA,
-        /* B  */      &d_B[Boffset],
-        /* LDB */     LDB,
-        /* BETA */    &beta,
-        /* C */       &d_C[Coffset],
-        /* LDC */     LDC);
+      cublasDgemm(/*cublas handle*/ handle,
+          /* TRANS A */ CUBLAS_OP_N,
+          /* TRANS B */ CUBLAS_OP_N,
+          /* M */       M,
+          /* N */       N,
+          /* K */       K,
+          /* alpha */   &alpha,
+          /* A */       &d_A[Aoffset],
+          /* LDA */     LDA,
+          /* B  */      &d_B[Boffset],
+          /* LDB */     LDB,
+          /* BETA */    &beta,
+          /* C */       &d_C[Coffset],
+          /* LDC */     LDC);
+    }
   }
   double stop = omp_get_wtime();
   printf("time of cublasDgemm loop: %f\n", stop - start);
+  fflush(stdout);
   cudaMemcpy(C, d_C, CBytes, cudaMemcpyDeviceToHost);
 
   cudaFree(d_A);
   cudaFree(d_B);
   cudaFree(d_C);
 }
+#endif
 
+#ifdef O_HIP
+void hip_array_dgemm(
+    const double *const A, const double *const B, double *const C,
+    const size_t *const Ms, const size_t *const Ns, const size_t *const Ks,
+    const size_t *const Aoffsets, const size_t *const Boffsets, const size_t *const Coffsets, const size_t nBlocks, const int nIters){
 
+  const size_t na = Aoffsets[nBlocks];
+  const size_t nb = Boffsets[nBlocks];
+  const size_t nc = Coffsets[nBlocks];
+  const size_t matrixBytes = (na+nb+nc)*sizeof(double);
+  double *a_;
+  HIP_CHECK(hipMalloc((void**)&a_,matrixBytes));
+  double *const b_ = a_+na;
+  double *const c_ = b_+nb;
+  const size_t abytes = na*sizeof(double);
+  HIP_CHECK(hipHostRegister((void*)A,abytes,hipHostRegisterDefault));
+  HIP_CHECK(hipMemcpyAsync(a_,A,abytes,hipMemcpyDefault,0));
+  const size_t bbytes = nb*sizeof(double);
+  HIP_CHECK(hipHostRegister((void*)B,bbytes,hipHostRegisterDefault));
+  HIP_CHECK(hipMemcpyAsync(b_,B,nb*sizeof(double),hipMemcpyDefault,0));
+
+  const size_t indexBytes = 3*nBlocks*sizeof(int);
+  int *ms;
+  HIP_CHECK(hipHostMalloc((void**)&ms,indexBytes,hipHostMallocDefault));
+  int *const ns = ms+nBlocks;
+  int *const ks = ns+nBlocks;
+
+  for (int i = 0; i < nBlocks; i++) {
+    ms[i] = Ms[i];
+    ns[i] = Ns[i];
+    ks[i] = Ks[i];
+  }
+
+  int *ms_;
+  HIP_CHECK(hipMalloc((void**)&ms_,indexBytes));
+  int *const ns_ = ms_+nBlocks;
+  int *const ks_ = ns_+nBlocks;
+
+  HIP_CHECK(hipMemcpyAsync(ms_,ms,indexBytes,hipMemcpyDefault,0));
+
+  const size_t offsetBytes = 3*nBlocks*sizeof(double*);
+  double **as;
+  HIP_CHECK(hipHostMalloc((void**)&as,offsetBytes,hipHostMallocDefault));
+  double **const bs = as+nBlocks;
+  double **const cs = bs+nBlocks;
+  for (int i = 0; i < nBlocks; i++) {
+    as[i] = a_+Aoffsets[i];
+    bs[i] = b_+Boffsets[i];
+    cs[i] = c_+Coffsets[i];
+  }
+
+  double **abcs;
+  HIP_CHECK(hipMalloc((void**)&abcs,offsetBytes));
+  HIP_CHECK(hipMemcpy(abcs,as,offsetBytes,hipMemcpyDefault));
+  const double *const *const as_ = (const double *const *)abcs;
+  const double *const *const bs_ = (const double *const *)abcs+nBlocks;
+  double *const *const cs_ = abcs+nBlocks+nBlocks;
+
+  const double start = omp_get_wtime();
+  for (int i = 0; i < nIters; i++) hip_dgemm_vbatched(as_,bs_,cs_,ms_,ns_,ks_,nBlocks);
+  HIP_CHECK(hipDeviceSynchronize());
+  const double stop = omp_get_wtime();
+  printf("time of hip_dgemm_vbatched: %f\n",stop-start);
+  fflush(stdout);
+
+  const size_t cbytes = nc*sizeof(double);
+  HIP_CHECK(hipHostRegister(C,cbytes,hipHostRegisterDefault));
+  HIP_CHECK(hipMemcpy(C,c_,nc*sizeof(double),hipMemcpyDefault));
+  HIP_CHECK(hipHostUnregister(C));
+
+  HIP_CHECK(hipFree((void*)as_));
+  HIP_CHECK(hipHostFree(as));
+  HIP_CHECK(hipFree(ms_));
+  HIP_CHECK(hipHostFree(ms));
+  HIP_CHECK(hipHostUnregister((void*)B));
+  HIP_CHECK(hipHostUnregister((void*)A));
+  HIP_CHECK(hipFree(a_));
+}
+#endif
+
+#ifdef O_MAGMA
 void magma_array_dgemm(
     const double *A, const double* B, double* C,
     const size_t *Ms, const size_t *Ns, const size_t *Ks,
-    const size_t *Aoffsets, const size_t *Boffsets, const size_t *Coffsets, const size_t nBlocks){
+    const size_t *Aoffsets, const size_t *Boffsets, const size_t *Coffsets, const size_t nBlocks, const int nIters){
   magma_trans_t transA = MagmaNoTrans;
   magma_trans_t transB = MagmaNoTrans;
   double const* * dA_array;
@@ -316,26 +421,29 @@ void magma_array_dgemm(
 
   double start,stop;
 
-  start = omp_get_wtime();
+  start = magma_wtime();
 
-  magmablas_dgemm_vbatched(	      transA,
-      /* magma_trans_t */ 	      transB,
-      /* magma_int_t * */         d_m,
-      /* magma_int_t * */	        d_n,
-      /* magma_int_t * */	        d_k,
-      /* double */	              alpha,
-      /* double const *const * */	dA_array,
-      /* magma_int_t * */	        d_ldda,
-      /* double const *const * */	dB_array,
-      /* magma_int_t * */	        d_lddb,
-      /* double */	              beta,
-      /* double ** */	            dC_array,
-      /* magma_int_t * */	        d_lddc,
-      /* magma_int_t */	          batchCount,
-      /* magma_queue_t */	        queue);
-  stop = omp_get_wtime();
+  for(int i = 0; i < nIters; i++){
+    magmablas_dgemm_vbatched(	      transA,
+        /* magma_trans_t */ 	      transB,
+        /* magma_int_t * */         d_m,
+        /* magma_int_t * */	        d_n,
+        /* magma_int_t * */	        d_k,
+        /* double */	              alpha,
+        /* double const *const * */	dA_array,
+        /* magma_int_t * */	        d_ldda,
+        /* double const *const * */	dB_array,
+        /* magma_int_t * */	        d_lddb,
+        /* double */	              beta,
+        /* double ** */	            dC_array,
+        /* magma_int_t * */	        d_lddc,
+        /* magma_int_t */	          batchCount,
+        /* magma_queue_t */	        queue);
+  }
+  stop = magma_sync_wtime(queue);
 
   printf("time of magmablas_dgemm_vbatched: %f\n", stop - start);
+  fflush(stdout);
 
   magma_getvector(Coffsets[nBlocks], sizeof(double), d_C_elems, 1, C, 1, queue);
 
@@ -366,6 +474,7 @@ void magma_array_dgemm(
   TESTING_CHECK( magma_free_cpu(hB_array) );
   TESTING_CHECK( magma_free_cpu(hC_array) );
 }
+#endif
 
 
 void host_matmul(const double *A, const double* B, double* C, const size_t M, const size_t N, const size_t K){
@@ -382,52 +491,56 @@ void host_matmul(const double *A, const double* B, double* C, const size_t M, co
 
 void host_array_matmul(const double *A, const double* B, double* C,
     const size_t *Ms, const size_t *Ns, const size_t *Ks,
-    const size_t *Aoffsets, const size_t *Boffsets, const size_t *Coffsets, const size_t nBlocks){
+    const size_t *Aoffsets, const size_t *Boffsets, const size_t *Coffsets, const size_t nBlocks, const int nIters){
 
-  for(size_t iBlock = 0; iBlock < nBlocks; iBlock++){
-    size_t Aoffset = Aoffsets[iBlock];
-    size_t Boffset = Boffsets[iBlock];
-    size_t Coffset = Coffsets[iBlock];
+  for(int i = 0; i < nIters; i++){
+    for(size_t iBlock = 0; iBlock < nBlocks; iBlock++){
+      size_t Aoffset = Aoffsets[iBlock];
+      size_t Boffset = Boffsets[iBlock];
+      size_t Coffset = Coffsets[iBlock];
 
-    host_matmul(&A[Aoffset], &B[Boffset], &C[Coffset], Ms[iBlock], Ns[iBlock], Ks[iBlock]);
+      host_matmul(&A[Aoffset], &B[Boffset], &C[Coffset], Ms[iBlock], Ns[iBlock], Ks[iBlock]);
+    }
   }
 }
 
 
 void host_array_dgemm(const double *A, const double* B, double* C,
     const size_t *Ms, const size_t *Ns, const size_t *Ks,
-    const size_t *Aoffsets, const size_t *Boffsets, const size_t *Coffsets, const size_t nBlocks){
+    const size_t *Aoffsets, const size_t *Boffsets, const size_t *Coffsets, const size_t nBlocks, const int nIters){
 
-  for(size_t iBlock = 0; iBlock < nBlocks; iBlock++){
-    size_t Aoffset = Aoffsets[iBlock];
-    size_t Boffset = Boffsets[iBlock];
-    size_t Coffset = Coffsets[iBlock];
+  for(int i = 0; i < nIters; i++){
+    for(size_t iBlock = 0; iBlock < nBlocks; iBlock++){
+      size_t Aoffset = Aoffsets[iBlock];
+      size_t Boffset = Boffsets[iBlock];
+      size_t Coffset = Coffsets[iBlock];
 
-    int M = Ms[iBlock];
-    int N = Ns[iBlock];
-    int K = Ks[iBlock];
-    int LDA = M;
-    int LDB = K;
-    int LDC = M;
-    double alpha = 1.0;
-    double beta = 0.0;
-    /* char transa = 'N'; */
-    /* char transb = 'N'; */
+      int M = Ms[iBlock];
+      int N = Ns[iBlock];
+      int K = Ks[iBlock];
+      int LDA = M;
+      int LDB = K;
+      int LDC = M;
+      double alpha = 1.0;
+      double beta = 0.0;
+      /* char transa = 'N'; */
+      /* char transb = 'N'; */
 
-    cblas_dgemm(/*CBLAS*/ CblasColMajor,
-        /* TRANS A */ CblasNoTrans,
-        /* TRANS B */ CblasNoTrans,
-        /* M */       M,
-        /* N */       N,
-        /* K */       K,
-        /* alpha */   alpha,
-        /* A */       &A[Aoffset],
-        /* LDA */     LDA,
-        /* B  */      &B[Boffset],
-        /* LDB */     LDB,
-        /* BETA */    beta,
-        /* C */       &C[Coffset],
-        /* LDC */     LDC);
+      cblas_dgemm(/*CBLAS*/ CblasColMajor,
+          /* TRANS A */ CblasNoTrans,
+          /* TRANS B */ CblasNoTrans,
+          /* M */       M,
+          /* N */       N,
+          /* K */       K,
+          /* alpha */   alpha,
+          /* A */       &A[Aoffset],
+          /* LDA */     LDA,
+          /* B  */      &B[Boffset],
+          /* LDB */     LDB,
+          /* BETA */    beta,
+          /* C */       &C[Coffset],
+          /* LDC */     LDC);
+    }
   }
 }
 
@@ -456,22 +569,20 @@ int check_equal(double *mat_A, double *mat_B, size_t nrows, size_t ncols){
 
 
 int check_matrix_array_equal(double *mat_A, double *mat_B, size_t *Aoffsets, size_t *Boffsets, size_t *nrows, size_t *ncols, size_t nBlocks){
-  int flag = 1;
   for(size_t iBlock = 0; iBlock < nBlocks; iBlock++){
     size_t Aoffset = Aoffsets[iBlock];
     size_t Boffset = Boffsets[iBlock];
 
-    flag *= check_equal( &mat_A[Aoffset], &mat_B[Boffset], nrows[iBlock], ncols[iBlock] );
     if( !check_equal(&mat_A[Aoffset], &mat_B[Boffset], nrows[iBlock], ncols[iBlock]) ){
       printf("error in block: %zu\n", iBlock);
-      printf("A\n");
+      printf("C\n");
       print_matrix( &mat_A[Aoffset], nrows[iBlock], ncols[iBlock] );
-      printf("B\n");
+      printf("C'\n");
       print_matrix( &mat_B[Aoffset], nrows[iBlock], ncols[iBlock] );
-      return flag;
+      return iBlock;
     }
   }
-  return flag;
+  return -1;
 }
 
 
@@ -498,16 +609,20 @@ void load_random_matrix(double* mat_in, size_t nrows, size_t ncols){
 
 
 int main(){
+#ifdef O_MAGMA
   // Start magma
   TESTING_CHECK( magma_init() );
   magma_print_environment();
+#endif
 
   // magma seems to break at 2^16, but 2^15 blocks is fine
-  size_t nBlocks = 1<<25;
+  size_t nBlocks = 1<<16;
+  const int nIters = 60;
   size_t max_block_size = 10;
   // Small test for debugging
-  // size_t nBlocks = 3;
-  // size_t max_block_size = 4;
+  //const int nIters = 1;
+  //size_t nBlocks = 3;
+  //size_t max_block_size = 4;
 
   size_t *Ms_array;
   size_t *Ns_array;
@@ -571,6 +686,9 @@ int main(){
     load_random_matrix(&h_B[Boffset], Ks_array[iBlock], Ns_array[iBlock]);
   }
 
+  printf("%d iterations with %lu matrices of size (1-%lu)x(1-%lu)\n", nIters, nBlocks, max_block_size, max_block_size);
+  fflush(stdout);
+
   double start,stop;
   int check;
   //////////////////////////////////////////////////////////////////////
@@ -578,17 +696,19 @@ int main(){
   //////////////////////////////////////////////////////////////////////
 
   start = omp_get_wtime();
-  host_array_matmul(h_A, h_B, h_C, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks);
+  host_array_matmul(h_A, h_B, h_C, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks, nIters);
   stop = omp_get_wtime();
   printf("naive loop time: %f\n", stop - start);
+  fflush(stdout);
 
   start = omp_get_wtime();
-  host_array_dgemm(h_A, h_B, h_C_host, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks);
+  host_array_dgemm(h_A, h_B, h_C_host, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks, nIters);
   stop = omp_get_wtime();
   printf("host blas time: %f\n", stop - start);
+  fflush(stdout);
 
   check = check_matrix_array_equal(h_C_host, h_C, Coffsets, Coffsets, Ms_array, Ns_array, nBlocks);
-  if( check == 0 ){
+  if( check >= 0 ){
     printf("check host dgemm failed: %d\n",check);
   }
 
@@ -596,38 +716,62 @@ int main(){
   // Run tests on device
   //////////////////////////////////////////////////////////////////////
 
+#ifdef O_CUDA
   cublasHandle_t handle;
   cublasCreate(&handle);
 
   start = omp_get_wtime();
-  cublas_array_dgemm(handle, h_A, h_B, h_C_device, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks);
+  cublas_array_dgemm(handle, h_A, h_B, h_C_device, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks, nIters);
   stop = omp_get_wtime();
   printf("cublas wrapper time: %f\n", stop - start);
 
   check = check_matrix_array_equal(h_C_device, h_C, Coffsets, Coffsets, Ms_array, Ns_array, nBlocks);
-  if( check == 0 ){
+  if( check >= 0 ){
     printf("check device dgemm failed: %d\n",check);
   }
+  cublasDestroy(handle);
+#endif
 
+#ifdef O_MAGMA
   start = omp_get_wtime();
-  magma_array_dgemm(h_A, h_B, h_C_magma, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks);
+  magma_array_dgemm(h_A, h_B, h_C_magma, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks, nIters);
   stop = omp_get_wtime();
   printf("magma blas wrapper time: %f\n", stop - start);
+  fflush(stdout);
 
   check = check_matrix_array_equal(h_C_magma, h_C, Coffsets, Coffsets, Ms_array, Ns_array, nBlocks);
-  if( check == 0 ){
+  if( check >= 0 ){
     printf("magma dgemm failed: %d\n",check);
   }
+  magma_finalize();
+#endif
+
+#ifdef O_HIP
+  HIP_CHECK(hipDeviceSynchronize());
+  start = omp_get_wtime();
+  hip_array_dgemm(h_A, h_B, h_C_device, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks, nIters);
+  stop = omp_get_wtime();
+  printf("hip blas wrapper time: %f\n", stop - start);
+  fflush(stdout);
+
+  check = check_matrix_array_equal(h_C_device, h_C, Coffsets, Coffsets, Ms_array, Ns_array, nBlocks);
+  if ( check >= 0 ){
+    printf("hip dgemm failed: %d\n",check);
+    printf("A(%dx%d):\n",Ms_array[check],Ks_array[check]);
+    print_matrix(h_A+Aoffsets[check],Ms_array[check],Ks_array[check]);
+    printf("B(%dx%d):\n",Ks_array[check],Ns_array[check]);
+    print_matrix(h_B+Boffsets[check],Ks_array[check],Ns_array[check]);
+    fflush(stdout);
+  }
+#endif
 
   // Clean up
-  cublasDestroy(handle);
   free(h_A);
   free(h_B);
   free(h_C);
   free(h_C_host);
   free(h_C_device);
   free(h_C_magma);
-  magma_finalize();
 
   return 0;
 }
