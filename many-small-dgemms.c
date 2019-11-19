@@ -22,6 +22,7 @@
 #define TOL 1.e-14
 
 #ifdef O_MAGMA
+#include <cuda_runtime.h>
 #include <magma_v2.h>
 
 // Pulled from magma test code
@@ -292,6 +293,7 @@ void hip_array_dgemm(
   const double *const *const bs_ = (const double *const *)abcs+nBlocks;
   double *const *const cs_ = abcs+nBlocks+nBlocks;
 
+  HIP_CHECK(hipDeviceSynchronize());
   const double start = omp_get_wtime();
   for (int i = 0; i < nIters; i++) hip_dgemm_vbatched(as_,bs_,cs_,ms_,ns_,ks_,nBlocks);
   HIP_CHECK(hipDeviceSynchronize());
@@ -421,7 +423,7 @@ void magma_array_dgemm(
 
   double start,stop;
 
-  start = magma_wtime();
+  start = magma_sync_wtime(queue);
 
   for(int i = 0; i < nIters; i++){
     magmablas_dgemm_vbatched(	      transA,
@@ -616,8 +618,8 @@ int main(){
 #endif
 
   // magma seems to break at 2^16, but 2^15 blocks is fine
-  size_t nBlocks = 1<<16;
-  const int nIters = 60;
+  size_t nBlocks = 1<<24;
+  const int nIters = 1;
   size_t max_block_size = 10;
   // Small test for debugging
   //const int nIters = 1;
@@ -749,7 +751,15 @@ int main(){
 #ifdef O_HIP
   HIP_CHECK(hipDeviceSynchronize());
   start = omp_get_wtime();
+  hip_init();
+  HIP_CHECK(hipDeviceSynchronize());
+  stop = omp_get_wtime();
+  printf("hip init time: %g\n", stop - start);
+  fflush(stdout);
+  HIP_CHECK(hipDeviceSynchronize());
+  start = omp_get_wtime();
   hip_array_dgemm(h_A, h_B, h_C_device, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks, nIters);
+  HIP_CHECK(hipDeviceSynchronize());
   stop = omp_get_wtime();
   printf("hip blas wrapper time: %f\n", stop - start);
   fflush(stdout);

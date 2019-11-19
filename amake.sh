@@ -4,5 +4,7 @@ module load gcc
 module load openblas
 module load rocm
 
-#make -f Makefile.amd clean
+export KMDUMPISA=1
+
+make -f Makefile.amd clean
 make -f Makefile.amd

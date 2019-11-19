@@ -5,6 +5,7 @@ extern "C" {
 #endif
 void hip_dgemm_vbatched(const double *const *a, const double *const *b, double *const *c,
                         const int *m, const int *n, const int *k, const int nb);
+void hip_init();
 #ifdef __cplusplus
 }
 #endif

@@ -1,5 +1,5 @@
 ccomp?=cc
-cflags=-fopenmp -Ofast -DO_CUDA -DO_MAGMA
+cflags=-fopenmp -Ofast -DO_MAGMA
 cexec=many-small-dgemms.x
 csources=many-small-dgemms.c
 cobjects=${patsubst %.c,%.c.obj, $(csources)}
