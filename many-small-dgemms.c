@@ -10,7 +10,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#ifdef O_BLAS
 #include <cblas.h>
+#endif
 #ifdef O_CUDA
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
@@ -22,7 +24,6 @@
 #define TOL 1.e-14
 
 #ifdef O_MAGMA
-#include <cuda_runtime.h>
 #include <magma_v2.h>
 
 // Pulled from magma test code
@@ -95,34 +96,8 @@ void print_matrix_array(double *mat_A, size_t *Aoffsets, size_t *nrows, size_t *
 }
 
 
+
 #ifdef O_CUDA
-void cblas_wrapper(double *A, double* B, double* C, size_t M_in, size_t N_in, size_t K_in){
-  int M = M_in;
-  int K = K_in;
-  int N = N_in;
-  int LDA = M;
-  int LDB = K;
-  int LDC = M;
-  double alpha = 1.0;
-  double beta = 0.0;
-
-  cblas_dgemm(/*CBLAS*/ CblasColMajor,
-      /* TRANS A */ CblasNoTrans,
-      /* TRANS B */ CblasNoTrans,
-      /* M */M,
-      /* N */N,
-      /* K */K,
-      /* alpha */alpha,
-      /* A */A,
-      /* LDA */LDA,
-      /* B  */B,
-      /* LDB */LDB,
-      /* BETA */beta,
-      /* C */C,
-      /* LDC */LDC);
-}
-
-
 void device_dgemm(cublasHandle_t handle, double *A, double* B, double* C, size_t M_in, size_t N_in, size_t K_in){
   int M = M_in;
   int K = K_in;
@@ -479,7 +454,7 @@ void magma_array_dgemm(
 #endif
 
 
-void host_matmul(const double *A, const double* B, double* C, const size_t M, const size_t N, const size_t K){
+static inline void host_matmul(const double *A, const double* B, double* C, const size_t M, const size_t N, const size_t K){
   for(size_t i = 0; i < M; i++){
     for(size_t j = 0; j < N; j++){
       C[ idx(i,j,M,N) ] = 0.0;
@@ -496,6 +471,7 @@ void host_array_matmul(const double *A, const double* B, double* C,
     const size_t *Aoffsets, const size_t *Boffsets, const size_t *Coffsets, const size_t nBlocks, const int nIters){
 
   for(int i = 0; i < nIters; i++){
+#pragma omp parallel for
     for(size_t iBlock = 0; iBlock < nBlocks; iBlock++){
       size_t Aoffset = Aoffsets[iBlock];
       size_t Boffset = Boffsets[iBlock];
@@ -507,6 +483,7 @@ void host_array_matmul(const double *A, const double* B, double* C,
 }
 
 
+#ifdef O_BLAS
 void host_array_dgemm(const double *A, const double* B, double* C,
     const size_t *Ms, const size_t *Ns, const size_t *Ks,
     const size_t *Aoffsets, const size_t *Boffsets, const size_t *Coffsets, const size_t nBlocks, const int nIters){
@@ -545,6 +522,7 @@ void host_array_dgemm(const double *A, const double* B, double* C,
     }
   }
 }
+#endif
 
 
 void host_transpose(double *mat_in, double *mat_out, size_t nrows_in, size_t ncols_in){
@@ -617,9 +595,13 @@ int main(){
   magma_print_environment();
 #endif
 
-  // magma seems to break at 2^16, but 2^15 blocks is fine
-  size_t nBlocks = 1<<24;
-  const int nIters = 1;
+  // Largest array of small matrices
+  //size_t nBlocks = 1<<25;
+  //const int nIters = 1;
+  //size_t max_block_size = 10;
+  // Moderate array with many iterations
+  size_t nBlocks = 1<<16;
+  const int nIters = 1<<13;
   size_t max_block_size = 10;
   // Small test for debugging
   //const int nIters = 1;
@@ -700,9 +682,10 @@ int main(){
   start = omp_get_wtime();
   host_array_matmul(h_A, h_B, h_C, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks, nIters);
   stop = omp_get_wtime();
-  printf("naive loop time: %f\n", stop - start);
+  printf("naive OpenMP loop time: %f\n", stop - start);
   fflush(stdout);
 
+#ifdef O_BLAS
   start = omp_get_wtime();
   host_array_dgemm(h_A, h_B, h_C_host, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks, nIters);
   stop = omp_get_wtime();
@@ -713,6 +696,7 @@ int main(){
   if( check >= 0 ){
     printf("check host dgemm failed: %d\n",check);
   }
+#endif
 
   //////////////////////////////////////////////////////////////////////
   // Run tests on device
