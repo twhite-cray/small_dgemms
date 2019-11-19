@@ -470,8 +470,9 @@ void host_array_matmul(const double *A, const double* B, double* C,
     const size_t *Ms, const size_t *Ns, const size_t *Ks,
     const size_t *Aoffsets, const size_t *Boffsets, const size_t *Coffsets, const size_t nBlocks, const int nIters){
 
+#pragma omp parallel
   for(int i = 0; i < nIters; i++){
-#pragma omp parallel for
+#pragma omp for
     for(size_t iBlock = 0; iBlock < nBlocks; iBlock++){
       size_t Aoffset = Aoffsets[iBlock];
       size_t Boffset = Boffsets[iBlock];
@@ -595,18 +596,22 @@ int main(){
   magma_print_environment();
 #endif
 
+#ifdef O_BIG
   // Largest array of small matrices
-  //size_t nBlocks = 1<<25;
-  //const int nIters = 1;
-  //size_t max_block_size = 10;
+  size_t nBlocks = 1<<25;
+  const int nIters = 1;
+  size_t max_block_size = 10;
+#elif defined O_MEDIUM
   // Moderate array with many iterations
   size_t nBlocks = 1<<16;
   const int nIters = 1<<13;
   size_t max_block_size = 10;
+#else
   // Small test for debugging
-  //const int nIters = 1;
-  //size_t nBlocks = 3;
-  //size_t max_block_size = 4;
+  const int nIters = 1;
+  size_t nBlocks = 3;
+  size_t max_block_size = 4;
+#endif
 
   size_t *Ms_array;
   size_t *Ns_array;
@@ -682,7 +687,7 @@ int main(){
   start = omp_get_wtime();
   host_array_matmul(h_A, h_B, h_C, Ms_array, Ns_array, Ks_array, Aoffsets, Boffsets, Coffsets, nBlocks, nIters);
   stop = omp_get_wtime();
-  printf("naive OpenMP loop time: %f\n", stop - start);
+  printf("naive OpenMP loop time (%d threads): %f\n", omp_get_max_threads(), stop - start);
   fflush(stdout);
 
 #ifdef O_BLAS

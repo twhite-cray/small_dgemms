@@ -1,4 +1,5 @@
 *.o
 *.obj
-*.x
+*x*
 *.exe
+dump*

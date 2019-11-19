@@ -1,6 +1,9 @@
 ccomp?=cc
-cflags=-fopenmp -Ofast -DO_MAGMA
-cexec=many-small-dgemms.x
+cflags=-fopenmp -Ofast
+cflags += -DO_MAGMA
+cflags += -DO_BIG
+#cflags += -DO_MEDIUM
+cexec=many-small-dgemms.nv.x
 csources=many-small-dgemms.c
 cobjects=${patsubst %.c,%.c.obj, $(csources)}
 clibs=-L $(LIBRARY_PATH) -lmagma -lcublas -lcudart -lopenblas -lstdc++ -lcusparse

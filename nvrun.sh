@@ -7,4 +7,4 @@ module load openblas
 module load cuda10.1
 module load gcc
 
-srun -n1 --exclusive -p v100 ./many-small-dgemms.x
+srun -n1 --exclusive -p v100 ./many-small-dgemms.nv.x
